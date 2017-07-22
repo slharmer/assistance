@@ -1,0 +1,78 @@
+---
+title: "area-under_curve"
+author: "Stacey Harmer"
+date: "7/20/2017"
+output: 
+  html_document: 
+    keep_md: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+My goal is to automate a previously created function so that I can easily determine qPCR area-under-curve for individual genes and across unique time frames (time frames unique to each genotype and represent one circadian day).
+
+```{r}
+library(tidyverse)
+library(MESS)
+```
+
+Below is the original code:
+
+```{r}
+Akiva.12deg<- read.csv("qRT-PCR_data_12c_6genes_n.csv")
+head(Akiva.12deg)
+tail(Akiva.12deg)
+
+```
+
+Make the data wide
+```{r}
+PCR.12.wide <- spread(Akiva.12deg,key = gene, value = expn ) %>%
+  mutate(gt.rep = paste(gt, rep, sep = "."))
+head(PCR.12.wide)
+
+```
+
+Original code:
+
+```{r}
+
+PRR5_12deg_24_48.6 <- sapply(unique(PCR.12.wide$gt.rep), function(gt.rep) {
+  tmp <- PCR.12.wide[PCR.12.wide$gt.rep==gt.rep,]
+  auc(tmp$time,tmp$PRR5,type="spline", from =24, to = 48.6)
+})
+PRR5_12deg_24_48.6
+```
+
+I want to be able to step through each of the genes.  would it be better if I used long insetad of wide dataframe?
+
+```{r}
+
+Akiva.12deg <- Akiva.12deg %>%
+  mutate(gt.rep = paste(gt, rep, sep = "."))
+
+head(Akiva.12deg)
+
+#all_12deg_24_48.6 <- sapply(unique(Akiva.12deg$gt.rep), function(gt.rep) {
+#  gene <- Akiva.12deg[Akiva.12deg$gene==gene,],
+#  tmp <- Akiva.12deg[Akiva.12deg$gt.rep==gt.rep,]
+#  auc(tmp$time,tmp$gene,type="spline", from =24, to = 48.6)
+#})
+
+```
+that failed. 
+
+```{r}
+head(PCR.12.wide)
+```
+
+I suspect I need to incoroprate something like the below
+
+ for(i in 5:10)
+    { 
+      PCR.12.wide[, i];
+    }
+but I can't figure it out
+
