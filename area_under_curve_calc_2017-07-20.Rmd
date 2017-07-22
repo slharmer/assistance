@@ -94,3 +94,125 @@ PRR5_12deg_24_48.6
 ```
 
 Success!
+
+### can we use lmer as function within summarize?
+
+I will calculate the AUC for one circadian day for the differnet genotypes
+
+### Col 
+```{r}
+library(MESS)
+
+auc_Col <- Akiva.12deg %>%
+  group_by(gene, rep, gt) %>%
+  summarize(auc = auc(time, expn, type="spline", from =24, to = 48.6)) %>%
+  filter(gt == "Col") %>%
+  mutate(gt.biorep = paste(gt, rep, sep="."))
+
+auc_Col
+# and now spread so it's wide 
+
+auc_Col <- spread(auc_Col, key = gene, value = auc )
+```
+
+### cca1 lhy
+ccalhy: 21.5 hr   (24 to 45.5)
+```{r}
+auc_cca1lhy <- Akiva.12deg %>%
+  group_by(gene, rep, gt) %>%
+  summarize(auc = auc(time, expn, type="spline", from =24, to = 45.5)) %>%
+  filter(gt == "cca1lhy") %>%
+  mutate(gt.biorep = paste(gt, rep, sep="."))
+
+auc_cca1lhy
+# and now spread so it's wide 
+
+auc_cca1lhy <- spread(auc_cca1lhy, key = gene, value = auc )
+
+```
+
+### rve468
+rve468: 29.24     (24 to 53.2)
+```{r}
+auc_rve468 <- Akiva.12deg %>%
+  group_by(gene, rep, gt) %>%
+  summarize(auc = auc(time, expn, type="spline", from =24, to = 53.2)) %>%
+  filter(gt == "rve468") %>%
+  mutate(gt.biorep = paste(gt, rep, sep="."))
+
+auc_rve468
+# and now spread so it's wide 
+
+auc_rve468 <- spread(auc_rve468, key = gene, value = auc )
+
+```
+
+### quint
+quint: 25.5      (24 to 49.5)
+```{r}
+auc_quint <- Akiva.12deg %>%
+  group_by(gene, rep, gt) %>%
+  summarize(auc = auc(time, expn, type="spline", from =24, to = 49.5)) %>%
+  filter(gt == "cca1lhyrve468") %>%
+  mutate(gt.biorep = paste(gt, rep, sep="."))
+
+auc_quint
+# and now spread so it's wide 
+
+auc_quint <- spread(auc_quint, key = gene, value = auc )
+
+```
+
+Great, now join them together.  
+
+```{r}
+
+auc_all <- bind_rows(auc_Col, auc_cca1lhy, auc_rve468, auc_quint)
+auc_all
+```
+
+Now gather for easy ggplotting
+```{r}
+auc_all_gather <- auc_all %>%
+  gather(key = "gene", value ="AUC", 4:9)
+
+```
+
+Now I can easily plot them all using facet
+
+```{r}
+# first, order genotypes appropriately
+gt_order <- c("Col", "cca1lhy", "rve468", "cca1lhyrve468")
+
+auc_all_gather <- auc_all_gather %>%
+  mutate(gt = factor(gt, levels = gt_order)) %>%
+  arrange(gt)
+
+# now plot
+auc_all_gather %>%
+  group_by(gt) %>%
+  ggplot(aes(color = gt)) +
+  geom_boxplot(aes(x = gt, y=AUC)) + 
+  facet_wrap(~gene)
+
+```
+
+Can I use lmer wiht summrize?
+
+```{r}
+library(lme4)
+library(lmerTest)
+head(auc_all_gather)
+```
+
+My attempt:
+
+```{r}
+
+#lmer_12deg <-  auc_all_gather %>%
+#  group_by(gene, gt) %>%
+#  summarize(lmer = lmer(AUC ~ gt + (1|rep))) 
+
+```
+
+failed.
