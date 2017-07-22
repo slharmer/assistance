@@ -21,7 +21,7 @@ library(MESS)
 Below is the original code:
 
 ```{r}
-Akiva.12deg<- read.csv("qRT-PCR_data_12c_6genes_n.csv")
+Akiva.12deg<- read_csv("qRT-PCR_data_12c_6genes_n.csv") #read it in as a tibble
 head(Akiva.12deg)
 tail(Akiva.12deg)
 
@@ -76,3 +76,21 @@ I suspect I need to incoroprate something like the below
     }
 but I can't figure it out
 
+Yes, that would be one way to do it, but I wonder if we could use summarize instead
+
+```{r}
+results <- Akiva.12deg %>%
+  group_by(gene,gt,rep) %>%
+  summarize(auc=auc(time,expn,type="spline", from =24, to = 48.6))
+```
+
+let's compare the prr5 results from this method and the Stacey's single call
+```{r}
+results %>% filter(gene=="PRR5")
+```
+
+```{r}
+PRR5_12deg_24_48.6
+```
+
+Success!
