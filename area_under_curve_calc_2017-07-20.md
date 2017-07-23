@@ -56,6 +56,10 @@ library(MESS)
 ##     expand
 ```
 
+```r
+library(stringr)
+```
+
 Below is the original code:
 
 
@@ -511,11 +515,209 @@ head(auc_all_gather)
 
 My attempt:
 
+Rather than comment this out, use eval=FALSE in the header.  Makes it easier to run and see the error when you want to
+
 
 ```r
-#lmer_12deg <-  auc_all_gather %>%
-#  group_by(gene, gt) %>%
-#  summarize(lmer = lmer(AUC ~ gt + (1|rep))) 
+lmer_12deg <-  auc_all_gather %>%
+  group_by(gene, gt) %>%
+  summarize(lmer = lmer(AUC ~ gt + (1|rep))) 
 ```
 
 failed.
+
+First, although this is not causing your error, I don't think you want to be grouping by `gt` since that is in your `lmer` formula.  If you do, then you are fitting a separate lmer model both for every gene and for every genotype.
+
+The first problem is that `%>%` feeds in the tibble to the first argument of the function (`lmer` in this case) but `lmer` doesn't want it there.  So we have to explicitly define where we want the tibble to go with `.`
+
+
+```r
+lmer_12deg <-  auc_all_gather %>%
+  group_by(gene) %>%
+  summarize(lmer = lmer(AUC ~ gt + (1|rep), data = .)) 
+```
+
+But in this case it is actually worse because summarize expects us to name which columns we want to work on.
+
+An additional problem is that summarize wants the function to produce a single value, not a complicated object.  So you could do something liket this, but it is ugly.  Plus lmer is getting called 7 times for every gene instead of just once.
+
+_If you are going to use this, please double check that it is giving the expected results...
+
+
+```r
+lmer.summary <- function(AUC,gt,rep,coef,column) {
+     tmp <- summary(lmer(AUC ~ gt + (1|rep)))[["coefficients"]][coef,column] 
+     return(tmp)
+}
+
+lmer_12deg <-  auc_all_gather %>%
+ group_by(gene) %>%
+ summarize(Col.estimate = lmer.summary(AUC,gt,rep,coef="(Intercept)",column="Estimate"),
+           cca1lhy.estimate = lmer.summary(AUC,gt,rep,coef="gtcca1lhy",column="Estimate"),
+           cca1lhy.pvalue = lmer.summary(AUC,gt,rep,coef="gtcca1lhy",column="Pr(>|t|)"),
+           rve468.estimate = lmer.summary(AUC,gt,rep,coef="gtrve468",column="Estimate"),
+           rve468.pvalue = lmer.summary(AUC,gt,rep,coef="gtrve468",column="Pr(>|t|)"),
+           cca1lhyrve468.estimate = lmer.summary(AUC,gt,rep,coef="gtcca1lhyrve468",column="Estimate"),
+           cca1lhyrve468y.pvalue = lmer.summary(AUC,gt,rep,coef="gtcca1lhyrve468",column="Pr(>|t|)")
+           )
+lmer_12deg
+```
+
+```
+## # A tibble: 6 × 8
+##    gene Col.estimate cca1lhy.estimate cca1lhy.pvalue rve468.estimate
+##   <chr>        <dbl>            <dbl>          <dbl>           <dbl>
+## 1  ELF4     32.53769       -2.4977737     0.72242536      -10.279696
+## 2   LUX     19.89334        2.3293793     0.17946684        8.531804
+## 3  PRR5     23.77187        6.6879595     0.15244293       -3.653124
+## 4  PRR7     19.80144        6.6648575     0.42471452        7.690925
+## 5  PRR9     24.60700       -0.4435397     0.89570536       10.125217
+## 6  TOC1     18.94623       10.0311087     0.06453199        4.150557
+## # ... with 3 more variables: rve468.pvalue <dbl>,
+## #   cca1lhyrve468.estimate <dbl>, cca1lhyrve468y.pvalue <dbl>
+```
+
+Trying an alternative way to specify the arguments to summarize...would still run lmer 7X more than needed.  And the setup is ugly...
+And doesn't work
+
+```r
+names <- str_c(rep(gt_order,each=2),c("estimate","pvalue"),sep=".")
+coefs <- rep(c("(Intercept)",str_c("gt",unique(auc_all_gather$gt))),each=2)
+dots <- str_c("lmer.summary(AUC,gt,rep,coef='",coefs,"',column='",c("Estimate","Pr(>|t|)"),"')")
+
+lmer_12deg <-  auc_all_gather %>%
+ group_by(gene) %>%
+ summarize_(.dots=setNames(dots,names)
+           )
+lmer_12deg
+```
+
+
+Instead we should use lapply (I think we will learn some tidy alternatice ttechniques for this in a few chapters)
+
+
+```r
+lmer_12deg <- lapply(unique(auc_all_gather$gene) , function(gene) {
+    lmer(AUC ~ gt + (1|rep), data=auc_all_gather[auc_all_gather$gene == gene,])
+})
+names(lmer_12deg) <- unique(auc_all_gather$gene)
+```
+
+Now we have a list of lmer objects and we can do various operatios on them
+
+
+```r
+lmer.summaries <- lapply(lmer_12deg,summary)
+```
+
+
+```r
+lmer.coefficient.tables <- lapply(lmer.summaries,function(x) x[["coefficients"]])
+lmer.coefficient.tables
+```
+
+```
+## $ELF4
+##                   Estimate Std. Error       df    t value    Pr(>|t|)
+## (Intercept)      32.537693   4.633030 3.999999  7.0229834 0.002165361
+## gtcca1lhy        -2.497774   6.552094 3.999999 -0.3812176 0.722425360
+## gtrve468        -10.279696   6.552094 3.999999 -1.5689177 0.191746929
+## gtcca1lhyrve468  -3.984407   6.552094 3.999999 -0.6081121 0.575950027
+## 
+## $LUX
+##                  Estimate Std. Error       df   t value     Pr(>|t|)
+## (Intercept)     19.893342   1.178969 2.887169 16.873513 0.0005640467
+## gtcca1lhy        2.329379   1.335474 3.000000  1.744234 0.1794668359
+## gtrve468         8.531804   1.335474 3.000000  6.388595 0.0077663192
+## gtcca1lhyrve468  4.278577   1.335474 3.000000  3.203789 0.0491891043
+## 
+## $PRR5
+##                  Estimate Std. Error df    t value     Pr(>|t|)
+## (Intercept)     23.771872   2.680381  4  8.8688403 0.0008927764
+## gtcca1lhy        6.687959   3.790631  4  1.7643392 0.1524429289
+## gtrve468        -3.653124   3.790631  4 -0.9637244 0.3897587990
+## gtcca1lhyrve468 -1.550252   3.790631  4 -0.4089695 0.7035116901
+## 
+## $PRR7
+##                  Estimate Std. Error       df    t value   Pr(>|t|)
+## (Intercept)     19.801438   5.160804 3.996046  3.8368902 0.01854274
+## gtcca1lhy        6.664858   7.231967 2.999990  0.9215830 0.42471452
+## gtrve468         7.690925   7.231967 2.999990  1.0634624 0.36558441
+## gtcca1lhyrve468 -5.160112   7.231967 2.999990 -0.7135144 0.52702629
+## 
+## $PRR9
+##                    Estimate Std. Error df    t value     Pr(>|t|)
+## (Intercept)      24.6069959   2.246252  4 10.9546931 0.0003944581
+## gtcca1lhy        -0.4435397   3.176679  4 -0.1396237 0.8957053596
+## gtrve468         10.1252174   3.176679  4  3.1873590 0.0333001138
+## gtcca1lhyrve468 -11.3331881   3.176679  4 -3.5676211 0.0234255631
+## 
+## $TOC1
+##                   Estimate Std. Error       df   t value    Pr(>|t|)
+## (Intercept)     18.9462348   2.801444 3.999998 6.7630236 0.002493432
+## gtcca1lhy       10.0311087   3.961841 3.999998 2.5319313 0.064531987
+## gtrve468         4.1505569   3.961841 3.999998 1.0476335 0.353934570
+## gtcca1lhyrve468  0.5054256   3.961841 3.999998 0.1275734 0.904642969
+```
+
+
+```r
+combined.coefficient.table <- plyr::ldply(lmer.coefficient.tables)
+#unfortunately row names are lost
+combined.coefficient.table$gt <- unlist(lapply(lmer.coefficient.tables,rownames))
+combined.coefficient.table
+```
+
+```
+##     .id    Estimate Std. Error       df    t value     Pr(>|t|)
+## 1  ELF4  32.5376927   4.633030 3.999999  7.0229834 0.0021653609
+## 2  ELF4  -2.4977737   6.552094 3.999999 -0.3812176 0.7224253601
+## 3  ELF4 -10.2796963   6.552094 3.999999 -1.5689177 0.1917469287
+## 4  ELF4  -3.9844072   6.552094 3.999999 -0.6081121 0.5759500267
+## 5   LUX  19.8933418   1.178969 2.887169 16.8735130 0.0005640467
+## 6   LUX   2.3293793   1.335474 3.000000  1.7442338 0.1794668359
+## 7   LUX   8.5318038   1.335474 3.000000  6.3885950 0.0077663192
+## 8   LUX   4.2785774   1.335474 3.000000  3.2037889 0.0491891043
+## 9  PRR5  23.7718717   2.680381 4.000000  8.8688403 0.0008927764
+## 10 PRR5   6.6879595   3.790631 4.000000  1.7643392 0.1524429289
+## 11 PRR5  -3.6531237   3.790631 4.000000 -0.9637244 0.3897587990
+## 12 PRR5  -1.5502524   3.790631 4.000000 -0.4089695 0.7035116901
+## 13 PRR7  19.8014384   5.160804 3.996046  3.8368902 0.0185427366
+## 14 PRR7   6.6648575   7.231967 2.999990  0.9215830 0.4247145176
+## 15 PRR7   7.6909251   7.231967 2.999990  1.0634624 0.3655844104
+## 16 PRR7  -5.1601123   7.231967 2.999990 -0.7135144 0.5270262919
+## 17 PRR9  24.6069959   2.246252 4.000000 10.9546931 0.0003944581
+## 18 PRR9  -0.4435397   3.176679 4.000000 -0.1396237 0.8957053596
+## 19 PRR9  10.1252174   3.176679 4.000000  3.1873590 0.0333001138
+## 20 PRR9 -11.3331881   3.176679 4.000000 -3.5676211 0.0234255631
+## 21 TOC1  18.9462348   2.801444 3.999998  6.7630236 0.0024934318
+## 22 TOC1  10.0311087   3.961841 3.999998  2.5319313 0.0645319870
+## 23 TOC1   4.1505569   3.961841 3.999998  1.0476335 0.3539345697
+## 24 TOC1   0.5054256   3.961841 3.999998  0.1275734 0.9046429689
+##                 gt
+## 1      (Intercept)
+## 2        gtcca1lhy
+## 3         gtrve468
+## 4  gtcca1lhyrve468
+## 5      (Intercept)
+## 6        gtcca1lhy
+## 7         gtrve468
+## 8  gtcca1lhyrve468
+## 9      (Intercept)
+## 10       gtcca1lhy
+## 11        gtrve468
+## 12 gtcca1lhyrve468
+## 13     (Intercept)
+## 14       gtcca1lhy
+## 15        gtrve468
+## 16 gtcca1lhyrve468
+## 17     (Intercept)
+## 18       gtcca1lhy
+## 19        gtrve468
+## 20 gtcca1lhyrve468
+## 21     (Intercept)
+## 22       gtcca1lhy
+## 23        gtrve468
+## 24 gtcca1lhyrve468
+```
+

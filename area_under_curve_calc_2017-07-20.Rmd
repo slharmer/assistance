@@ -16,6 +16,7 @@ My goal is to automate a previously created function so that I can easily determ
 ```{r}
 library(tidyverse)
 library(MESS)
+library(stringr)
 ```
 
 Below is the original code:
@@ -207,12 +208,95 @@ head(auc_all_gather)
 
 My attempt:
 
-```{r}
+Rather than comment this out, use eval=FALSE in the header.  Makes it easier to run and see the error when you want to
 
-#lmer_12deg <-  auc_all_gather %>%
-#  group_by(gene, gt) %>%
-#  summarize(lmer = lmer(AUC ~ gt + (1|rep))) 
+```{r, eval=FALSE}
+
+lmer_12deg <-  auc_all_gather %>%
+  group_by(gene, gt) %>%
+  summarize(lmer = lmer(AUC ~ gt + (1|rep))) 
 
 ```
 
 failed.
+
+First, although this is not causing your error, I don't think you want to be grouping by `gt` since that is in your `lmer` formula.  If you do, then you are fitting a separate lmer model both for every gene and for every genotype.
+
+The first problem is that `%>%` feeds in the tibble to the first argument of the function (`lmer` in this case) but `lmer` doesn't want it there.  So we have to explicitly define where we want the tibble to go with `.`
+
+```{r, eval=FALSE}
+
+lmer_12deg <-  auc_all_gather %>%
+  group_by(gene) %>%
+  summarize(lmer = lmer(AUC ~ gt + (1|rep), data = .)) 
+
+```
+
+But in this case it is actually worse because summarize expects us to name which columns we want to work on.
+
+An additional problem is that summarize wants the function to produce a single value, not a complicated object.  So you could do something liket this, but it is ugly.  Plus lmer is getting called 7 times for every gene instead of just once.
+
+_If you are going to use this, please double check that it is giving the expected results...
+
+```{r}
+lmer.summary <- function(AUC,gt,rep,coef,column) {
+     tmp <- summary(lmer(AUC ~ gt + (1|rep)))[["coefficients"]][coef,column] 
+     return(tmp)
+}
+
+lmer_12deg <-  auc_all_gather %>%
+ group_by(gene) %>%
+ summarize(Col.estimate = lmer.summary(AUC,gt,rep,coef="(Intercept)",column="Estimate"),
+           cca1lhy.estimate = lmer.summary(AUC,gt,rep,coef="gtcca1lhy",column="Estimate"),
+           cca1lhy.pvalue = lmer.summary(AUC,gt,rep,coef="gtcca1lhy",column="Pr(>|t|)"),
+           rve468.estimate = lmer.summary(AUC,gt,rep,coef="gtrve468",column="Estimate"),
+           rve468.pvalue = lmer.summary(AUC,gt,rep,coef="gtrve468",column="Pr(>|t|)"),
+           cca1lhyrve468.estimate = lmer.summary(AUC,gt,rep,coef="gtcca1lhyrve468",column="Estimate"),
+           cca1lhyrve468y.pvalue = lmer.summary(AUC,gt,rep,coef="gtcca1lhyrve468",column="Pr(>|t|)")
+           )
+lmer_12deg
+```
+
+Trying an alternative way to specify the arguments to summarize...would still run lmer 7X more than needed.  And the setup is ugly...
+And doesn't work
+```{r, eval=FALSE}
+names <- str_c(rep(gt_order,each=2),c("estimate","pvalue"),sep=".")
+coefs <- rep(c("(Intercept)",str_c("gt",unique(auc_all_gather$gt))),each=2)
+dots <- str_c("lmer.summary(AUC,gt,rep,coef='",coefs,"',column='",c("Estimate","Pr(>|t|)"),"')")
+
+lmer_12deg <-  auc_all_gather %>%
+ group_by(gene) %>%
+ summarize_(.dots=setNames(dots,names)
+           )
+lmer_12deg
+
+```
+
+
+Instead we should use lapply (I think we will learn some tidy alternatice ttechniques for this in a few chapters)
+
+```{r}
+lmer_12deg <- lapply(unique(auc_all_gather$gene) , function(gene) {
+    lmer(AUC ~ gt + (1|rep), data=auc_all_gather[auc_all_gather$gene == gene,])
+})
+names(lmer_12deg) <- unique(auc_all_gather$gene)
+```
+
+Now we have a list of lmer objects and we can do various operatios on them
+
+```{r}
+lmer.summaries <- lapply(lmer_12deg,summary)
+```
+
+```{r}
+lmer.coefficient.tables <- lapply(lmer.summaries,function(x) x[["coefficients"]])
+lmer.coefficient.tables
+```
+
+```{r}
+combined.coefficient.table <- plyr::ldply(lmer.coefficient.tables)
+#unfortunately row names are lost
+combined.coefficient.table$gt <- unlist(lapply(lmer.coefficient.tables,rownames))
+combined.coefficient.table
+```
+
